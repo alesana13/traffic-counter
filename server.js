@@ -161,7 +161,8 @@ app.post('/api/verify', (req, res) => {
   res.json({ valid: true, name: result.name });
 });
 
-// GET /approve/:token
+// GET /approve/:token — HANYA tampilkan halaman konfirmasi, TIDAK langsung approve
+// Ini mencegah Telegram link preview bot auto-approve saat membaca pesan
 app.get('/approve/:token', (req, res) => {
   const s = sessions.get(req.params.token);
   if (!s) return res.send(htmlResponse('❌ Token Tidak Ditemukan', 'Token tidak valid atau sudah kadaluarsa.', false));
@@ -170,10 +171,46 @@ app.get('/approve/:token', (req, res) => {
     return res.send(htmlResponse('⏰ Token Kadaluarsa', `Permintaan dari <b>${s.name}</b> sudah habis waktunya.`, false));
   }
   if (s.status === 'approved') return res.send(htmlResponse('✅ Sudah Diizinkan', `Akses untuk <b>${s.name}</b> sudah diizinkan.`, true));
-  if (s.status === 'rejected') return res.send(htmlResponse('🚫 Sudah Ditolak', `Ubah jadi diizinkan?`, false, req.params.token));
+
+  // Tampilkan halaman konfirmasi — user harus klik tombol untuk approve
+  const token = req.params.token;
+  const color = '#f5c842';
+  res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1"><title>Konfirmasi Akses</title>
+  <style>
+    body{font-family:'Segoe UI',sans-serif;background:#080b0f;color:#ddd;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+    .card{background:#0f1318;border:1px solid ${color}44;border-radius:16px;padding:32px 28px;max-width:360px;width:90%;text-align:center;box-shadow:0 0 40px ${color}22}
+    h2{color:${color};font-size:1.3rem;margin-bottom:8px}
+    p{line-height:1.6;color:#aaa;font-size:.9rem;margin-bottom:24px}
+    .name{color:#fff;font-weight:700;font-size:1.1rem}
+    .btn-approve{display:block;width:100%;padding:14px;background:rgba(0,230,118,.15);border:2px solid #00e676;color:#00e676;border-radius:10px;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:10px;text-decoration:none}
+    .btn-reject{display:block;width:100%;padding:12px;background:rgba(255,59,59,.1);border:1px solid #ff3b3b;color:#ff3b3b;border-radius:10px;font-size:.9rem;font-weight:700;cursor:pointer;text-decoration:none}
+    .btn-approve:hover{background:rgba(0,230,118,.3)}
+    .btn-reject:hover{background:rgba(255,59,59,.2)}
+  </style></head><body>
+  <div class="card">
+    <h2>🚦 Permintaan Akses</h2>
+    <p>Pengguna berikut ingin menggunakan<br><b>Traffic Counter:</b></p>
+    <p class="name">👤 ${s.name}</p>
+    <form method="POST" action="/approve/${token}">
+      <button class="btn-approve" type="submit">✅ IZINKAN AKSES</button>
+    </form>
+    <a class="btn-reject" href="/reject/${token}">❌ Tolak</a>
+  </div></body></html>`);
+});
+
+// POST /approve/:token — eksekusi approve setelah konfirmasi
+app.post('/approve/:token', (req, res) => {
+  const s = sessions.get(req.params.token);
+  if (!s) return res.send(htmlResponse('❌ Token Tidak Ditemukan', 'Token tidak valid atau sudah kadaluarsa.', false));
+  if (Date.now() > s.expiresAt) {
+    s.status = 'expired';
+    return res.send(htmlResponse('⏰ Token Kadaluarsa', `Permintaan dari <b>${s.name}</b> sudah habis waktunya.`, false));
+  }
+  if (s.status === 'approved') return res.send(htmlResponse('✅ Sudah Diizinkan', `Akses untuk <b>${s.name}</b> sudah diizinkan.`, true));
 
   s.status = 'approved';
-  revoked.delete(req.params.token); // batalkan revoke jika ada
+  revoked.delete(req.params.token);
   console.log(`✅ DIIZINKAN: "${s.name}" (${s.ip})`);
   res.send(htmlResponse('✅ Akses Diizinkan!', `<b>${s.name}</b> sekarang bisa menggunakan Traffic Counter.`, true));
 });
