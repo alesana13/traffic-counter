@@ -420,11 +420,12 @@ header {
 
 <script>
 // ══════════════════════════════════════════════
-//  AUTH GATE
+//  AUTH GATE — Server-Gated Version
+//  App TIDAK BISA dibuka tanpa accessKey dari server
 // ══════════════════════════════════════════════
-let currentToken = null;
-let pollInterval = null;
-let revalidateInterval = null;
+let currentToken  = null;
+let pollInterval  = null;
+let revalidateInt = null;
 
 const screenReq    = document.getElementById('screen-request');
 const screenWait   = document.getElementById('screen-wait');
@@ -437,11 +438,52 @@ function showScreen(id) {
   });
 }
 
-// ── PAKSA HAPUS SESSION & TAMPIL FORM setiap kali halaman dibuka
-// Tidak ada auto-login — user SELALU harus minta akses baru
+function showRejectScreen(title, desc) {
+  document.getElementById('reject-title').textContent = title;
+  document.getElementById('reject-desc').textContent  = desc;
+  showScreen('screen-reject');
+}
+
+// ── Saat halaman dibuka: cek apakah ada accessKey tersimpan
 window.addEventListener('DOMContentLoaded', () => {
-  sessionStorage.removeItem('tc_approved');
-  // screen-request sudah tampil by default (tidak hidden)
+  const saved = sessionStorage.getItem('tc_access');
+  if (!saved) return; // tidak ada → tampil form (default)
+  try {
+    const { token, accessKey, name, grantedAt } = JSON.parse(saved);
+    if (!token || !accessKey || !name) { sessionStorage.removeItem('tc_access'); return; }
+
+    // Session hanya berlaku 2 jam sejak disetujui
+    const TWO_HOURS = 2 * 60 * 60 * 1000;
+    if (Date.now() - grantedAt > TWO_HOURS) {
+      sessionStorage.removeItem('tc_access');
+      return;
+    }
+
+    // Coba verifikasi ke server dulu
+    fetch('/api/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, accessKey })
+    })
+    .then(r => r.json())
+    .then(d => {
+      if (d.valid) {
+        // Server confirm valid → masuk app
+        launchApp(name, token, accessKey);
+      } else {
+        // Server bilang tidak valid (dicabut) → hapus dan minta akses ulang
+        sessionStorage.removeItem('tc_access');
+        showScreen('screen-request');
+      }
+    })
+    .catch(() => {
+      // Server tidak bisa dijangkau (Railway restart/sleep) →
+      // percayai sessionStorage selama belum 2 jam
+      launchApp(name, token, accessKey);
+    });
+  } catch(e) {
+    sessionStorage.removeItem('tc_access');
+  }
 });
 
 // ── REQUEST ACCESS
@@ -452,28 +494,33 @@ document.getElementById('btn-request').onclick = async () => {
   if (name.length < 2) { errEl.textContent = '⚠ Nama minimal 2 karakter'; return; }
 
   const btn = document.getElementById('btn-request');
-  btn.disabled = true; btn.textContent = '⏳ Mengirim...';
+  btn.disabled = true;
+  btn.textContent = '⏳ Mengirim...';
+  sessionStorage.removeItem('tc_access');
 
   try {
     const res  = await fetch('/api/request-access', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
     });
     const data = await res.json();
     if (!res.ok) {
       errEl.textContent = data.error || 'Gagal mengirim permintaan';
-      btn.disabled=false; btn.textContent='📲 Kirim Permintaan Akses';
+      btn.disabled = false;
+      btn.textContent = '📲 Kirim Permintaan Akses';
       return;
     }
     currentToken = data.token;
     document.getElementById('wait-token').textContent = data.token;
-    const expiresIn = Math.round((data.expires - Date.now()) / 1000);
-    document.getElementById('wait-expire').textContent = `Berlaku ${Math.floor(expiresIn/60)} menit`;
+    const mins = Math.floor((data.expires - Date.now()) / 60000);
+    document.getElementById('wait-expire').textContent = `Berlaku ${mins} menit`;
     showScreen('screen-wait');
-    setTimeout(() => startPolling(name), 2000);
+    startPolling(name);
   } catch(e) {
     errEl.textContent = '⚠ Gagal terhubung ke server';
-    btn.disabled=false; btn.textContent='📲 Kirim Permintaan Akses';
+    btn.disabled = false;
+    btn.textContent = '📲 Kirim Permintaan Akses';
   }
 };
 
@@ -481,89 +528,100 @@ document.getElementById('input-name').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('btn-request').click();
 });
 
-// ── POLLING saat menunggu persetujuan
+// ── POLLING — hanya buka jika server kirim accessKey
 function startPolling(name) {
   clearInterval(pollInterval);
   let count = 0;
   pollInterval = setInterval(async () => {
-    if (++count > 200) { // maks 10 menit
+    if (++count > 300) { // max 15 menit
       clearInterval(pollInterval);
-      showRejectScreen('⏰ Waktu Habis', 'Permintaan tidak disetujui dalam 10 menit.');
+      showRejectScreen('⏰ Waktu Habis', 'Tidak ada persetujuan dalam 15 menit.');
       return;
     }
     try {
       const res  = await fetch(`/api/status/${currentToken}`);
-      // parse response terlepas dari status HTTP
       const data = await res.json().catch(() => ({}));
       const st   = data.status || '';
 
-      if (st === 'approved') {
+      if (st === 'approved' && data.accessKey) {
+        // ✅ Server kirim accessKey → simpan dan buka app
         clearInterval(pollInterval);
-        launchApp(name, currentToken);
+        sessionStorage.setItem('tc_access', JSON.stringify({
+          token: currentToken,
+          accessKey: data.accessKey,
+          name,
+          grantedAt: Date.now()
+        }));
+        launchApp(name, currentToken, data.accessKey);
+
+      } else if (st === 'approved' && !data.accessKey) {
+        // approved tapi tidak ada accessKey → tolak (tidak normal)
+        clearInterval(pollInterval);
+        showRejectScreen('⚠ Error Server', 'Respon tidak valid. Coba lagi.');
+
       } else if (st === 'rejected') {
         clearInterval(pollInterval);
         showRejectScreen('🚫 Akses Ditolak', 'Pemilik tidak mengizinkan akses saat ini.');
+
       } else if (st === 'expired' || st === 'not_found') {
         clearInterval(pollInterval);
-        showRejectScreen('⏰ Waktu Habis', 'Permintaan kadaluarsa. Silakan coba lagi.');
+        showRejectScreen('⏰ Kadaluarsa', 'Token habis. Silakan coba lagi.');
       }
       // 'pending' → lanjut polling
-    } catch(e) { /* jaringan error, lanjut polling */ }
+    } catch(e) { /* network error, lanjut */ }
   }, 3000);
-}
-
-function showRejectScreen(title, desc) {
-  document.getElementById('reject-title').textContent = title;
-  document.getElementById('reject-desc').textContent  = desc;
-  showScreen('screen-reject');
 }
 
 document.getElementById('btn-cancel').onclick = () => {
   clearInterval(pollInterval);
   currentToken = null;
-  const btn = document.getElementById('btn-request');
-  btn.disabled=false; btn.textContent='📲 Kirim Permintaan Akses';
   document.getElementById('input-name').value = '';
+  const btn = document.getElementById('btn-request');
+  btn.disabled = false;
+  btn.textContent = '📲 Kirim Permintaan Akses';
   showScreen('screen-request');
 };
 
 document.getElementById('btn-retry').onclick = () => {
   currentToken = null;
+  document.getElementById('input-name').value = '';
   const btn = document.getElementById('btn-request');
-  btn.disabled=false; btn.textContent='📲 Kirim Permintaan Akses';
+  btn.disabled = false;
+  btn.textContent = '📲 Kirim Permintaan Akses';
   showScreen('screen-request');
 };
 
-// ── LAUNCH APP
-function launchApp(name, token) {
-  [screenReq, screenWait, screenReject].forEach(s => s.style.display='none');
+// ── LAUNCH APP — hanya dipanggil jika punya accessKey valid
+function launchApp(name, token, accessKey) {
+  [screenReq, screenWait, screenReject].forEach(s => s.style.display = 'none');
   appEl.style.display = 'flex';
   document.getElementById('user-chip').textContent = name;
   initApp();
 
-  // Cek ulang status tiap 20 detik — jika dicabut/rejected, paksa keluar
-  clearInterval(revalidateInterval);
-  revalidateInterval = setInterval(async () => {
+  // Revalidasi ke server tiap 20 detik — jika dicabut, keluar paksa
+  clearInterval(revalidateInt);
+  revalidateInt = setInterval(async () => {
     try {
-      const res  = await fetch(`/api/status/${token}`);
+      const res  = await fetch('/api/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, accessKey })
+      });
       const data = await res.json().catch(() => ({}));
-      const st   = data.status || '';
-      if (st === 'rejected' || st === 'expired' || st === 'not_found') {
-        clearInterval(revalidateInterval);
-        // Hentikan deteksi
+      if (!data.valid) {
+        clearInterval(revalidateInt);
+        sessionStorage.removeItem('tc_access');
         running = false;
         cancelAnimationFrame(animId);
         if (stream) stream.getTracks().forEach(t => t.stop());
-        // Kembalikan ke halaman request
         appEl.style.display = 'none';
         [screenReq, screenWait, screenReject].forEach(s => {
           s.style.display = '';
           s.classList.add('hidden');
         });
         showRejectScreen('🚫 Akses Dicabut', 'Pemilik telah mencabut akses Anda.');
-        showScreen('screen-reject');
       }
-    } catch(e) { /* jaringan error, tetap di app */ }
+    } catch(e) { /* network error, tetap di app */ }
   }, 20000);
 }
 

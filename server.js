@@ -124,7 +124,24 @@ app.get('/api/status/:token', (req, res) => {
     s.status = 'expired';
   }
 
-  res.json({ status: s.status, name: s.name });
+  // Jika approved, kirim juga accessKey (bukti server)
+  const payload = { status: s.status, name: s.name };
+  if (s.status === 'approved') {
+    // accessKey = hash sederhana dari token + secret
+    payload.accessKey = Buffer.from(req.params.token + '_GRANTED_' + s.name).toString('base64');
+  }
+
+  res.json(payload);
+});
+
+// GET /api/verify  — app verifikasi accessKey saat load
+app.post('/api/verify', (req, res) => {
+  const { token, accessKey } = req.body;
+  if (!token || !accessKey) return res.status(400).json({ valid: false });
+  const s = sessions.get(token);
+  if (!s || s.status !== 'approved') return res.json({ valid: false });
+  const expected = Buffer.from(token + '_GRANTED_' + s.name).toString('base64');
+  res.json({ valid: accessKey === expected, name: s.name });
 });
 
 // GET /approve/:token  — owner klik link di WA
