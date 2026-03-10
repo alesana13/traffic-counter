@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>TrafficCount — Mudik & Balik</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+
+<style>
+:root {
+  --bg:    #080b0f;
+  --panel: #0f1318;
+  --bdr:   rgba(255,255,255,.08);
+  --text:  #ddd8cc;
+  --dim:   #445;
+  --mudik: #ff6b35;
+  --balik: #29d4a8;
+  --amber: #f5c842;
+  --red:   #ff3b3b;
+  --cyan:  #00e5ff;
+  --green: #00e676;
+}
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body { height:100%; overflow:hidden; }
+body {
+  background:var(--bg); color:var(--text);
+  font-family:'Rajdhani',sans-serif;
+  display:flex; flex-direction:column; height:100dvh; user-select:none;
+}
+
+/* ════════════════════════════════
+   AUTH GATE SCREENS
+   ════════════════════════════════ */
+.screen {
+  position:fixed; inset:0; z-index:100;
+  background:var(--bg);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding:24px;
+  transition: opacity .4s, transform .4s;
+}
+.screen.hidden { opacity:0; pointer-events:none; transform:scale(.97); }
+
+/* logo besar */
+.gate-logo {
+  font-size:1.6rem; font-weight:700; letter-spacing:.12em; margin-bottom:6px;
+}
+.gate-logo .m { color:var(--mudik); }
+.gate-logo .b { color:var(--balik); }
+.gate-logo .sep { color:var(--dim); margin:0 5px; }
+.gate-sub { font-family:'Share Tech Mono',monospace; font-size:.65rem; color:var(--dim); letter-spacing:.15em; margin-bottom:32px; }
+
+/* card */
+.gate-card {
+  background:var(--panel); border:1px solid var(--bdr); border-radius:16px;
+  padding:24px 22px; width:100%; max-width:380px;
+}
+.gate-card h2 {
+  font-size:1.15rem; font-weight:700; letter-spacing:.08em; color:var(--amber);
+  margin-bottom:6px;
+}
+.gate-card p {
+  font-size:.78rem; color:var(--dim); line-height:1.6;
+  font-family:'Share Tech Mono',monospace; margin-bottom:20px;
+}
+
+/* input */
+.gate-input {
+  width:100%; padding:12px 14px;
+  background:rgba(255,255,255,.05); border:1px solid var(--bdr); border-radius:8px;
+  color:var(--text); font-family:'Rajdhani',sans-serif; font-size:1rem; font-weight:600;
+  outline:none; margin-bottom:14px; transition:border-color .2s;
+}
+.gate-input:focus { border-color:var(--amber); }
+.gate-input::placeholder { color:var(--dim); font-weight:400; }
+
+/* btn */
+.gate-btn {
+  width:100%; padding:13px;
+  background:rgba(245,200,66,.12); border:1px solid var(--amber); border-radius:8px;
+  color:var(--amber); font-family:'Rajdhani',sans-serif; font-size:.95rem; font-weight:700;
+  letter-spacing:.12em; text-transform:uppercase; cursor:pointer; transition:background .2s;
+}
+.gate-btn:hover   { background:rgba(245,200,66,.22); }
+.gate-btn:active  { opacity:.7; }
+.gate-btn:disabled { opacity:.4; cursor:not-allowed; }
+
+.gate-err { font-size:.72rem; color:var(--red); margin-top:10px; min-height:18px; font-family:'Share Tech Mono',monospace; }
+
+/* ── waiting screen ── */
+.wait-icon {
+  font-size:3rem; margin-bottom:16px;
+  animation: wbounce 1.5s ease-in-out infinite;
+}
+@keyframes wbounce { 0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)} }
+
+.wait-title { font-size:1.15rem; font-weight:700; color:var(--amber); margin-bottom:8px; letter-spacing:.06em; }
+.wait-desc  { font-family:'Share Tech Mono',monospace; font-size:.68rem; color:var(--dim); line-height:1.8; text-align:center; margin-bottom:20px; }
+
+.wait-token {
+  font-family:'Share Tech Mono',monospace; font-size:1.5rem; font-weight:700;
+  color:var(--cyan); letter-spacing:.3em;
+  background:rgba(0,229,255,.08); border:1px solid rgba(0,229,255,.3); border-radius:8px;
+  padding:10px 20px; margin-bottom:8px;
+}
+.wait-expire { font-family:'Share Tech Mono',monospace; font-size:.62rem; color:var(--dim); margin-bottom:24px; }
+
+.pulse-ring {
+  width:64px; height:64px; border-radius:50%; margin-bottom:20px;
+  border:3px solid var(--amber); position:relative;
+  animation:pring 1.5s ease-out infinite;
+}
+.pulse-ring::after {
+  content:''; position:absolute; inset:-10px; border-radius:50%;
+  border:2px solid rgba(245,200,66,.3); animation:pring2 1.5s ease-out infinite;
+}
+@keyframes pring  { 0%,100%{box-shadow:0 0 0 0 rgba(245,200,66,.6)}50%{box-shadow:0 0 0 16px rgba(245,200,66,0)} }
+@keyframes pring2 { 0%,100%{transform:scale(1); opacity:1}100%{transform:scale(1.5); opacity:0} }
+
+.wait-wa { font-family:'Share Tech Mono',monospace; font-size:.62rem; color:#25D366; margin-top:6px; }
+
+/* progress dots */
+.dots span { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--amber); margin:0 3px; animation:dotblink 1.2s ease-in-out infinite; }
+.dots span:nth-child(2) { animation-delay:.2s; }
+.dots span:nth-child(3) { animation-delay:.4s; }
+@keyframes dotblink { 0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)} }
+
+.btn-cancel { background:none; border:none; color:var(--dim); font-family:'Share Tech Mono',monospace; font-size:.65rem; cursor:pointer; margin-top:16px; text-decoration:underline; }
+
+/* ── rejected screen ── */
+.reject-icon { font-size:3rem; margin-bottom:16px; }
+.reject-title { font-size:1.15rem; font-weight:700; color:var(--red); margin-bottom:8px; }
+.reject-desc  { font-family:'Share Tech Mono',monospace; font-size:.68rem; color:var(--dim); text-align:center; line-height:1.8; margin-bottom:20px; }
+.retry-btn {
+  padding:12px 28px; background:rgba(255,59,59,.12); border:1px solid var(--red);
+  border-radius:8px; color:var(--red); font-family:'Rajdhani',sans-serif;
+  font-size:.9rem; font-weight:700; letter-spacing:.1em; cursor:pointer;
+}
+
+/* ════════════════════════════════
+   MAIN APP  (sama seperti sebelumnya)
+   ════════════════════════════════ */
+#app { display:flex; flex-direction:column; height:100dvh; }
+
+header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:8px 14px; background:var(--panel); border-bottom:1px solid var(--bdr);
+  flex-shrink:0; z-index:10;
+}
+.logo { font-size:1.1rem; font-weight:700; letter-spacing:.1em; }
+.logo .m { color:var(--mudik); }
+.logo .b { color:var(--balik); }
+.logo .sep { color:var(--dim); margin:0 4px; }
+.hdr-r { display:flex; align-items:center; gap:8px; }
+.live-dot { width:8px; height:8px; border-radius:50%; background:var(--dim); transition:all .3s; }
+.live-dot.on { background:var(--green); box-shadow:0 0 8px var(--green); animation:pdot 1.5s ease-in-out infinite; }
+@keyframes pdot { 0%,100%{box-shadow:0 0 4px var(--green);}50%{box-shadow:0 0 16px var(--green);} }
+.status-lbl { font-family:'Share Tech Mono',monospace; font-size:.7rem; letter-spacing:.1em; color:var(--dim); }
+.status-lbl.on { color:var(--green); }
+.user-chip {
+  font-family:'Share Tech Mono',monospace; font-size:.58rem; color:var(--balik);
+  background:rgba(41,212,168,.1); border:1px solid rgba(41,212,168,.3);
+  padding:2px 8px; border-radius:20px; letter-spacing:.06em; max-width:90px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+
+.cam-wrap { position:relative; flex:1; background:#000; overflow:hidden; }
+#video { width:100%; height:100%; object-fit:cover; display:block; }
+#canvas { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:3; }
+.cam-wrap::after {
+  content:''; position:absolute; inset:0; z-index:2; pointer-events:none;
+  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.05) 3px,rgba(0,0,0,.05) 4px);
+}
+.dir-label {
+  position:absolute; top:50%; transform:translateY(-50%);
+  font-family:'Share Tech Mono',monospace; font-size:.62rem;
+  letter-spacing:.07em; padding:3px 9px; border-radius:4px;
+  z-index:5; pointer-events:none; white-space:nowrap;
+}
+.dir-label.mudik { left:calc(50% + 10px); background:rgba(255,107,53,.18); border:1px solid var(--mudik); color:var(--mudik); }
+.dir-label.balik { right:calc(50% + 10px); background:rgba(41,212,168,.18); border:1px solid var(--balik); color:var(--balik); }
+
+.cam-badge {
+  position:absolute; top:10px;
+  font-family:'Share Tech Mono',monospace; font-size:.6rem;
+  background:rgba(0,0,0,.72); border-radius:6px; padding:5px 10px;
+  z-index:7; letter-spacing:.06em; text-align:center;
+}
+.cam-badge.left  { left:10px;  border:1px solid rgba(255,107,53,.5); color:var(--mudik); }
+.cam-badge.right { right:10px; border:1px solid rgba(41,212,168,.5); color:var(--balik); }
+.cam-badge .num  { font-size:1.2rem; font-weight:700; display:block; line-height:1.2; }
+.cam-switch {
+  position:absolute; bottom:10px; right:10px;
+  background:rgba(0,0,0,.6); border:1px solid var(--bdr); color:var(--amber);
+  font-size:1.1rem; width:36px; height:36px; border-radius:8px;
+  cursor:pointer; z-index:7; display:flex; align-items:center; justify-content:center;
+}
+.fps-badge {
+  position:absolute; bottom:10px; left:10px;
+  font-family:'Share Tech Mono',monospace; font-size:.6rem;
+  background:rgba(0,0,0,.6); border:1px solid var(--bdr); color:var(--cyan);
+  padding:3px 8px; border-radius:4px; z-index:7;
+}
+#loading {
+  position:absolute; inset:0; background:rgba(8,11,15,.93);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:14px; z-index:20;
+}
+.spinner { width:46px; height:46px; border-radius:50%; border:3px solid rgba(245,200,66,.15); border-top-color:var(--amber); animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+#load-text { font-family:'Share Tech Mono',monospace; font-size:.8rem; color:var(--amber); letter-spacing:.1em; text-align:center; padding:0 20px; }
+
+.dual-panel {
+  display:grid; grid-template-columns:1fr auto 1fr;
+  background:var(--panel); border-top:1px solid var(--bdr); flex-shrink:0;
+}
+.arus-block { padding:10px 8px 8px; display:flex; flex-direction:column; align-items:center; gap:2px; }
+.arus-block.mudik { border-right:1px solid var(--bdr); }
+.arus-arrow { font-size:1rem; line-height:1; }
+.arus-val { font-size:2.4rem; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; transition:transform .15s, color .15s; }
+.arus-block.mudik .arus-val { color:var(--mudik); }
+.arus-block.balik .arus-val { color:var(--balik); }
+.arus-label { font-size:.6rem; letter-spacing:.13em; text-transform:uppercase; font-family:'Share Tech Mono',monospace; color:var(--dim); margin-top:1px; }
+.arus-sub   { font-size:.57rem; font-family:'Share Tech Mono',monospace; color:var(--dim); margin-top:2px; }
+.total-div { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:8px 12px; gap:1px; }
+.total-num { font-size:1.6rem; font-weight:700; color:var(--amber); font-variant-numeric:tabular-nums; }
+.total-lbl { font-size:.55rem; letter-spacing:.12em; color:var(--dim); font-family:'Share Tech Mono',monospace; text-transform:uppercase; }
+.elapsed-lbl { font-size:.6rem; font-family:'Share Tech Mono',monospace; color:var(--dim); margin-top:2px; }
+
+.type-bar {
+  display:flex; gap:10px; padding:5px 14px;
+  background:rgba(0,0,0,.25); border-top:1px solid var(--bdr); overflow-x:auto; flex-shrink:0;
+}
+.tc { display:flex; align-items:center; gap:4px; font-size:.62rem; font-family:'Share Tech Mono',monospace; color:var(--dim); white-space:nowrap; }
+.tc .dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.tc b { color:var(--text); margin-left:2px; }
+
+.controls {
+  display:flex; gap:8px; padding:8px 12px 12px;
+  background:var(--panel); border-top:1px solid var(--bdr); flex-shrink:0;
+}
+.btn {
+  flex:1; padding:11px 6px; border-radius:8px; border:1px solid var(--bdr); background:transparent;
+  color:var(--text); font-family:'Rajdhani',sans-serif; font-size:.82rem; font-weight:600;
+  letter-spacing:.1em; text-transform:uppercase; cursor:pointer; transition:background .15s;
+  display:flex; align-items:center; justify-content:center; gap:5px;
+}
+.btn:active { opacity:.6; }
+.btn-start { border-color:var(--green); color:var(--green); }
+.btn-start.active { background:rgba(0,230,118,.12); }
+.btn-reset { border-color:var(--red); color:var(--red); }
+.btn-log   { border-color:var(--cyan); color:var(--cyan); }
+
+.backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:29; display:none; }
+.backdrop.show { display:block; }
+.log-drawer {
+  position:fixed; bottom:0; left:0; right:0; height:62dvh;
+  background:var(--panel); border-top:2px solid var(--amber); border-radius:16px 16px 0 0;
+  transform:translateY(100%); transition:transform .35s cubic-bezier(.4,0,.2,1);
+  z-index:30; display:flex; flex-direction:column;
+}
+.log-drawer.open { transform:translateY(0); }
+.drawer-handle { width:38px; height:4px; background:var(--bdr); border-radius:2px; margin:10px auto 0; flex-shrink:0; }
+.drawer-hdr { display:flex; justify-content:space-between; align-items:center; padding:8px 16px 4px; flex-shrink:0; }
+.drawer-title { font-size:.9rem; font-weight:700; letter-spacing:.1em; color:var(--amber); text-transform:uppercase; }
+.drawer-close { background:none; border:none; color:var(--dim); font-size:1.2rem; cursor:pointer; padding:4px; }
+.drawer-tabs { display:flex; border-bottom:1px solid var(--bdr); flex-shrink:0; }
+.dtab { flex:1; padding:8px; text-align:center; font-size:.72rem; font-family:'Share Tech Mono',monospace; letter-spacing:.07em; cursor:pointer; color:var(--dim); border-bottom:2px solid transparent; transition:all .2s; }
+.dtab.active.mudik { color:var(--mudik); border-color:var(--mudik); }
+.dtab.active.balik { color:var(--balik); border-color:var(--balik); }
+.dtab.active.all   { color:var(--amber); border-color:var(--amber); }
+.log-body { flex:1; overflow-y:auto; padding:6px 14px 14px; }
+.log-entry { display:flex; gap:8px; align-items:center; padding:4px 0; border-bottom:1px solid rgba(255,255,255,.04); font-family:'Share Tech Mono',monospace; font-size:.68rem; line-height:1.6; }
+.le-num  { color:var(--amber); min-width:30px; }
+.le-time { color:var(--dim); min-width:58px; }
+.le-dir.mudik { color:var(--mudik); min-width:72px; }
+.le-dir.balik { color:var(--balik); min-width:72px; }
+.le-type { color:var(--text); }
+.log-empty { color:var(--dim); font-family:'Share Tech Mono',monospace; font-size:.72rem; padding:12px 0; }
+.drawer-export { margin:8px 14px 6px; padding:9px; flex-shrink:0; border:1px solid rgba(0,229,255,.3); border-radius:7px; background:none; color:var(--cyan); font-family:'Rajdhani',sans-serif; font-size:.82rem; font-weight:600; letter-spacing:.1em; cursor:pointer; text-transform:uppercase; }
+.drawer-export:active { opacity:.6; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════
+     SCREEN 1: REQUEST ACCESS
+     ══════════════════════════════ -->
+<div class="screen" id="screen-request">
+  <div class="gate-logo">
+    <span class="m">MUDIK</span><span class="sep">/</span><span class="b">BALIK</span>
+  </div>
+  <div class="gate-sub">TRAFFIC COUNTER — AKSES TERBATAS</div>
+
+  <div class="gate-card">
+    <h2>🔐 Minta Akses</h2>
+    <p>Aplikasi ini memerlukan persetujuan pemilik.<br>
+       Masukkan nama Anda, notifikasi WA akan dikirim ke pemilik untuk disetujui.</p>
+    <input class="gate-input" id="input-name" type="text" placeholder="Masukkan nama Anda..." maxlength="40" autocomplete="off">
+    <button class="gate-btn" id="btn-request">📲 Kirim Permintaan Akses</button>
+    <div class="gate-err" id="req-err"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════
+     SCREEN 2: WAITING
+     ══════════════════════════════ -->
+<div class="screen hidden" id="screen-wait">
+  <div class="pulse-ring"></div>
+  <div class="wait-title">⏳ Menunggu Persetujuan...</div>
+  <div class="wait-desc">
+    Notifikasi WhatsApp telah dikirim ke pemilik.<br>
+    Halaman ini akan otomatis terbuka<br>setelah disetujui.
+  </div>
+  <div class="dots"><span></span><span></span><span></span></div>
+  <div style="margin-top:16px">
+    <div style="font-family:'Share Tech Mono',monospace;font-size:.6rem;color:var(--dim);text-align:center;margin-bottom:6px">KODE SESI ANDA</div>
+    <div class="wait-token" id="wait-token">——</div>
+    <div class="wait-expire" id="wait-expire"></div>
+  </div>
+  <div class="wait-wa">✈️ Notifikasi Telegram terkirim ke pemilik</div>
+  <button class="btn-cancel" id="btn-cancel">Batalkan permintaan</button>
+</div>
+
+<!-- ══════════════════════════════
+     SCREEN 3: REJECTED / EXPIRED
+     ══════════════════════════════ -->
+<div class="screen hidden" id="screen-reject">
+  <div class="reject-icon">🚫</div>
+  <div class="reject-title" id="reject-title">Akses Ditolak</div>
+  <div class="reject-desc" id="reject-desc">Pemilik tidak mengizinkan akses saat ini.</div>
+  <button class="retry-btn" id="btn-retry">↺ Coba Lagi</button>
+</div>
+
+<!-- ══════════════════════════════
+     MAIN APP
+     ══════════════════════════════ -->
+<div id="app" style="display:none">
+  <header>
+    <div class="logo">
+      <span class="m">MUDIK</span><span class="sep">/</span><span class="b">BALIK</span>
+      <span style="color:var(--dim);font-size:.7rem;margin-left:6px">COUNTER</span>
+    </div>
+    <div class="hdr-r">
+      <span class="user-chip" id="user-chip">—</span>
+      <span class="live-dot" id="live-dot"></span>
+      <span class="status-lbl" id="status-lbl">OFFLINE</span>
+    </div>
+  </header>
+
+  <div class="cam-wrap">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="canvas"></canvas>
+    <div class="dir-label mudik">MUDIK ▶</div>
+    <div class="dir-label balik">◀ BALIK</div>
+    <div class="cam-badge left"><span class="num" id="cam-mudik">0</span>MUDIK</div>
+    <div class="cam-badge right"><span class="num" id="cam-balik">0</span>BALIK</div>
+    <div class="fps-badge" id="fps-badge">-- FPS</div>
+    <button class="cam-switch" id="cam-switch">⟳</button>
+    <div id="loading">
+      <div class="spinner"></div>
+      <div id="load-text">MEMUAT MODEL AI...</div>
+    </div>
+  </div>
+
+  <div class="dual-panel">
+    <div class="arus-block mudik">
+      <div class="arus-arrow" style="color:var(--mudik)">▶</div>
+      <div class="arus-val" id="val-mudik">0</div>
+      <div class="arus-label">Arus Mudik</div>
+      <div class="arus-sub" id="sub-mudik">Mobil:0 Truk:0 Motor:0</div>
+    </div>
+    <div class="total-div">
+      <div class="total-num" id="val-total">0</div>
+      <div class="total-lbl">Total</div>
+      <div class="elapsed-lbl" id="elapsed">00:00</div>
+    </div>
+    <div class="arus-block balik">
+      <div class="arus-arrow" style="color:var(--balik)">◀</div>
+      <div class="arus-val" id="val-balik">0</div>
+      <div class="arus-label">Arus Balik</div>
+      <div class="arus-sub" id="sub-balik">Mobil:0 Truk:0 Motor:0</div>
+    </div>
+  </div>
+
+  <div class="type-bar">
+    <div class="tc"><div class="dot" style="background:#00e676"></div>Mobil <b id="tc-car">0</b></div>
+    <div class="tc"><div class="dot" style="background:#00e5ff"></div>Truk/Bus <b id="tc-truck">0</b></div>
+    <div class="tc"><div class="dot" style="background:#ff9f40"></div>Motor <b id="tc-moto">0</b></div>
+    <div class="tc" style="margin-left:auto"><div class="dot" style="background:#888"></div>Di frame <b id="tc-now">0</b></div>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-start" id="btn-start">▶ MULAI</button>
+    <button class="btn btn-reset" id="btn-reset">↺ RESET</button>
+    <button class="btn btn-log"   id="btn-log">📋 LOG</button>
+  </div>
+</div>
+
+<div class="backdrop" id="backdrop"></div>
+<div class="log-drawer" id="log-drawer">
+  <div class="drawer-handle"></div>
+  <div class="drawer-hdr">
+    <span class="drawer-title">📋 Riwayat Deteksi</span>
+    <button class="drawer-close" id="drawer-close">✕</button>
+  </div>
+  <div class="drawer-tabs">
+    <div class="dtab active all"  data-tab="all">Semua</div>
+    <div class="dtab mudik"       data-tab="mudik">▶ Mudik</div>
+    <div class="dtab balik"       data-tab="balik">◀ Balik</div>
+  </div>
+  <div class="log-body" id="log-body">
+    <div class="log-empty">Belum ada deteksi...</div>
+  </div>
+  <button class="drawer-export" id="btn-export">⬇ EXPORT CSV</button>
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+//  AUTH GATE
+// ══════════════════════════════════════════════
+let currentToken = null;
+let pollInterval = null;
+let approvedName = '';
+
+const screenReq    = document.getElementById('screen-request');
+const screenWait   = document.getElementById('screen-wait');
+const screenReject = document.getElementById('screen-reject');
+const appEl        = document.getElementById('app');
+
+function showScreen(id) {
+  [screenReq, screenWait, screenReject].forEach(s => {
+    s.classList.toggle('hidden', s.id !== id);
+  });
+}
+
+// ── REQUEST ACCESS
+document.getElementById('btn-request').onclick = async () => {
+  const name = document.getElementById('input-name').value.trim();
+  const errEl = document.getElementById('req-err');
+  errEl.textContent = '';
+
+  if (name.length < 2) { errEl.textContent = '⚠ Nama minimal 2 karakter'; return; }
+
+  const btn = document.getElementById('btn-request');
+  btn.disabled = true; btn.textContent = '⏳ Mengirim...';
+
+  try {
+    const res  = await fetch('/api/request-access', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name })
+    });
+    const data = await res.json();
+
+    if (!res.ok) { errEl.textContent = data.error || 'Gagal mengirim permintaan'; btn.disabled=false; btn.textContent='📲 Kirim Permintaan Akses'; return; }
+
+    currentToken = data.token;
+    document.getElementById('wait-token').textContent = data.token;
+
+    const expiresIn = Math.round((data.expires - Date.now()) / 1000);
+    document.getElementById('wait-expire').textContent = `Berlaku ${Math.floor(expiresIn/60)} menit`;
+
+    showScreen('screen-wait');
+    startPolling(name);
+
+  } catch(e) {
+    errEl.textContent = '⚠ Gagal terhubung ke server';
+    btn.disabled=false; btn.textContent='📲 Kirim Permintaan Akses';
+  }
+};
+
+// Enter key on input
+document.getElementById('input-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('btn-request').click();
+});
+
+// ── POLLING STATUS
+function startPolling(name) {
+  clearInterval(pollInterval);
+  pollInterval = setInterval(async () => {
+    try {
+      const res  = await fetch(`/api/status/${currentToken}`);
+      const data = await res.json();
+
+      if (data.status === 'approved') {
+        clearInterval(pollInterval);
+        approvedName = name;
+        launchApp(name);
+      } else if (data.status === 'rejected') {
+        clearInterval(pollInterval);
+        document.getElementById('reject-title').textContent = '🚫 Akses Ditolak';
+        document.getElementById('reject-desc').textContent  = 'Pemilik tidak mengizinkan akses saat ini. Hubungi pemilik untuk informasi lebih lanjut.';
+        showScreen('screen-reject');
+      } else if (data.status === 'expired' || data.status === 'not_found') {
+        clearInterval(pollInterval);
+        document.getElementById('reject-title').textContent = '⏰ Waktu Habis';
+        document.getElementById('reject-desc').textContent  = 'Permintaan akses tidak disetujui dalam waktu yang ditentukan. Silakan coba lagi.';
+        showScreen('screen-reject');
+      }
+    } catch(e) { /* keep polling */ }
+  }, 3000);
+}
+
+document.getElementById('btn-cancel').onclick = () => {
+  clearInterval(pollInterval);
+  currentToken = null;
+  document.getElementById('input-name').value = '';
+  const btn = document.getElementById('btn-request');
+  btn.disabled=false; btn.textContent='📲 Kirim Permintaan Akses';
+  showScreen('screen-request');
+};
+
+document.getElementById('btn-retry').onclick = () => {
+  currentToken = null;
+  const btn = document.getElementById('btn-request');
+  btn.disabled=false; btn.textContent='📲 Kirim Permintaan Akses';
+  showScreen('screen-request');
+};
+
+// ── LAUNCH APP
+function launchApp(name) {
+  [screenReq, screenWait, screenReject].forEach(s => s.style.display='none');
+  appEl.style.display = 'flex';
+  document.getElementById('user-chip').textContent = name;
+  initApp();
+}
+
+// ══════════════════════════════════════════════
+//  MAIN APP
+// ══════════════════════════════════════════════
+const VEHICLE_CLASSES = ['car','truck','bus','motorcycle','bicycle'];
+const CLASS_COLOR = { car:'#00e676', truck:'#00e5ff', bus:'#00e5ff', motorcycle:'#ff9f40', bicycle:'#ffec3d' };
+const LINE_RATIO   = 0.50;
+const IOU_THRESH   = 0.28;
+const CROSS_MARGIN = 0.05;
+
+let model=null, running=false, stream=null, useFrontCam=false, animId=null;
+const cnt = { mudik:{total:0,car:0,truck:0,moto:0}, balik:{total:0,car:0,truck:0,moto:0} };
+let grandTotal=0, trackedObjs=[], nextId=1, logEntries=[];
+let startTime=null, elapsedInt=null;
+let frameCount=0, fpsTime=Date.now();
+let activeTab='all';
+
+const video    = document.getElementById('video');
+const canvas   = document.getElementById('canvas');
+const ctx      = canvas.getContext('2d');
+const loading  = document.getElementById('loading');
+const loadTxt  = document.getElementById('load-text');
+const liveDot  = document.getElementById('live-dot');
+const statusLbl= document.getElementById('status-lbl');
+const valMudik = document.getElementById('val-mudik');
+const valBalik = document.getElementById('val-balik');
+const valTotal = document.getElementById('val-total');
+const subMudik = document.getElementById('sub-mudik');
+const subBalik = document.getElementById('sub-balik');
+const camMudik = document.getElementById('cam-mudik');
+const camBalik = document.getElementById('cam-balik');
+const elapsed  = document.getElementById('elapsed');
+const fpsBadge = document.getElementById('fps-badge');
+const tcCar    = document.getElementById('tc-car');
+const tcTruck  = document.getElementById('tc-truck');
+const tcMoto   = document.getElementById('tc-moto');
+const tcNow    = document.getElementById('tc-now');
+const btnStart = document.getElementById('btn-start');
+const btnReset = document.getElementById('btn-reset');
+const logBody  = document.getElementById('log-body');
+const drawer   = document.getElementById('log-drawer');
+const backdrop = document.getElementById('backdrop');
+
+async function initApp() {
+  model = await cocoSsd.load({ base:'lite_mobilenet_v2' });
+  loadTxt.textContent = 'MEMULAI KAMERA...';
+  await startCamera();
+  loading.style.display = 'none';
+}
+
+async function startCamera() {
+  if (stream) stream.getTracks().forEach(t=>t.stop());
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:useFrontCam?'user':{ideal:'environment'}, width:{ideal:1280}, height:{ideal:720} }
+    });
+    video.srcObject = stream; video.style.transform = useFrontCam?'scaleX(-1)':'scaleX(1)';
+    await video.play();
+  } catch(e) { loadTxt.textContent='❌ Izinkan akses kamera'; loading.style.display='flex'; }
+}
+document.getElementById('cam-switch').onclick = () => { useFrontCam=!useFrontCam; startCamera(); };
+
+async function detect() {
+  if (!running||!model||video.readyState<2) { if(running) animId=requestAnimationFrame(detect); return; }
+  canvas.width = video.videoWidth||video.clientWidth;
+  canvas.height= video.videoHeight||video.clientHeight;
+
+  const preds    = await model.detect(video);
+  const lineX    = canvas.width * LINE_RATIO;
+  const vehicles = preds.filter(p=>VEHICLE_CLASSES.includes(p.class)&&p.score>0.42);
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // vertical line
+  const grad=ctx.createLinearGradient(0,0,0,canvas.height);
+  grad.addColorStop(0,'transparent'); grad.addColorStop(.15,'#f5c842');
+  grad.addColorStop(.5,'#ffe066'); grad.addColorStop(.85,'#f5c842'); grad.addColorStop(1,'transparent');
+  ctx.save(); ctx.strokeStyle=grad; ctx.lineWidth=2; ctx.shadowColor='#f5c842'; ctx.shadowBlur=12;
+  ctx.setLineDash([10,5]); ctx.beginPath(); ctx.moveTo(lineX,0); ctx.lineTo(lineX,canvas.height); ctx.stroke();
+  ctx.setLineDash([]); ctx.font='bold 10px Share Tech Mono,monospace';
+  ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillRect(lineX-28,4,56,16);
+  ctx.fillStyle='#f5c842'; ctx.textAlign='center'; ctx.fillText('GARIS',lineX,15); ctx.restore();
+
+  const newTracked=[];
+  for (const pred of vehicles) {
+    const [x,y,w,h]=pred.bbox, cx=x+w/2, cy=y+h/2;
+    let bestId=-1, bestIou=IOU_THRESH;
+    for (const t of trackedObjs) { const iou=calcIoU([x,y,w,h],t.bbox); if(iou>bestIou){bestIou=iou;bestId=t.id;} }
+    let obj;
+    if (bestId>=0) {
+      obj=trackedObjs.find(t=>t.id===bestId);
+      obj.prevCx=obj.cx; obj.cx=cx; obj.cy=cy; obj.bbox=[x,y,w,h]; obj.frames++;
+    } else {
+      obj={id:nextId++, cx,cy,prevCx:cx,bbox:[x,y,w,h],class:pred.class,crossed:false,frames:1};
+    }
+    obj.score=pred.score;
+
+    if (!obj.crossed&&obj.frames>=2) {
+      const mg=canvas.width*CROSS_MARGIN;
+      const goRight=obj.prevCx<lineX-mg&&obj.cx>=lineX-mg;
+      const goLeft =obj.prevCx>lineX+mg&&obj.cx<=lineX+mg;
+      if (goRight||goLeft) {
+        obj.crossed=true; obj.direction=goRight?'mudik':'balik';
+        const d=obj.direction; grandTotal++; cnt[d].total++;
+        if(obj.class==='car') cnt[d].car++;
+        else if(obj.class==='truck'||obj.class==='bus') cnt[d].truck++;
+        else cnt[d].moto++;
+        addLog(d,obj.class,grandTotal);
+        bumpEl(d==='mudik'?valMudik:valBalik,d==='mudik'?'#ff6b35':'#29d4a8');
+        bumpEl(valTotal,'#f5c842');
+      }
+    }
+
+    const base=CLASS_COLOR[pred.class]||'#fff';
+    const col=obj.direction?(obj.direction==='mudik'?'#ff6b35':'#29d4a8'):base;
+    ctx.save();
+    ctx.strokeStyle=col; ctx.lineWidth=2; ctx.shadowColor=col; ctx.shadowBlur=7;
+    ctx.strokeRect(x,y,w,h);
+    if(obj.direction){ctx.font='bold 13px Arial';ctx.fillStyle=col;ctx.textAlign='center';ctx.fillText(obj.direction==='mudik'?'▶':'◀',cx,y-4);}
+    const label=`${pred.class.toUpperCase()} ${Math.round(pred.score*100)}%`;
+    ctx.font='bold 11px Share Tech Mono,monospace'; ctx.textAlign='left';
+    const tw=ctx.measureText(label).width;
+    ctx.fillStyle='rgba(0,0,0,.72)'; ctx.fillRect(x,y-18,tw+10,18);
+    ctx.fillStyle=col; ctx.fillText(label,x+5,y-5);
+    ctx.fillStyle=col; ctx.beginPath(); ctx.arc(cx,cy,4,0,Math.PI*2); ctx.fill();
+    ctx.restore(); newTracked.push(obj);
+  }
+  trackedObjs=newTracked;
+
+  valMudik.textContent=cnt.mudik.total; valBalik.textContent=cnt.balik.total; valTotal.textContent=grandTotal;
+  camMudik.textContent=cnt.mudik.total; camBalik.textContent=cnt.balik.total;
+  subMudik.textContent=`Mobil:${cnt.mudik.car} Truk:${cnt.mudik.truck} Motor:${cnt.mudik.moto}`;
+  subBalik.textContent=`Mobil:${cnt.balik.car} Truk:${cnt.balik.truck} Motor:${cnt.balik.moto}`;
+  tcCar.textContent=cnt.mudik.car+cnt.balik.car; tcTruck.textContent=cnt.mudik.truck+cnt.balik.truck;
+  tcMoto.textContent=cnt.mudik.moto+cnt.balik.moto; tcNow.textContent=vehicles.length;
+
+  frameCount++; const now=Date.now();
+  if(now-fpsTime>=1000){fpsBadge.textContent=`${Math.round(frameCount*1000/(now-fpsTime))} FPS`;frameCount=0;fpsTime=now;}
+  animId=requestAnimationFrame(detect);
+}
+
+function calcIoU(b1,b2){
+  const[x1,y1,w1,h1]=b1,[x2,y2,w2,h2]=b2;
+  const xi=Math.max(x1,x2),yi=Math.max(y1,y2),xe=Math.min(x1+w1,x2+w2),ye=Math.min(y1+h1,y2+h2);
+  const inter=Math.max(0,xe-xi)*Math.max(0,ye-yi);
+  return inter/((w1*h1)+(w2*h2)-inter+1e-6);
+}
+function bumpEl(el,color){el.style.transform='scale(1.3)';el.style.color=color;setTimeout(()=>{el.style.transform='';el.style.color='';},300);}
+
+function addLog(dir,cls,num){const t=new Date().toLocaleTimeString('id-ID');logEntries.unshift({num,dir,cls,t});renderLog();}
+function renderLog(){
+  const f=activeTab==='all'?logEntries:logEntries.filter(e=>e.dir===activeTab);
+  if(!f.length){logBody.innerHTML='<div class="log-empty">Belum ada deteksi...</div>';return;}
+  logBody.innerHTML=f.map(e=>`<div class="log-entry"><span class="le-num">#${e.num}</span><span class="le-time">${e.t}</span><span class="le-dir ${e.dir}">${e.dir==='mudik'?'▶ MUDIK':'◀ BALIK'}</span><span class="le-type">${e.cls.toUpperCase()}</span></div>`).join('');
+}
+document.querySelectorAll('.dtab').forEach(tab=>{
+  tab.onclick=()=>{
+    document.querySelectorAll('.dtab').forEach(t=>t.classList.remove('active','mudik','balik','all'));
+    tab.classList.add('active',tab.dataset.tab); activeTab=tab.dataset.tab; renderLog();
+  };
+});
+
+function startTimer(){startTime=Date.now();elapsedInt=setInterval(()=>{const s=Math.floor((Date.now()-startTime)/1000);elapsed.textContent=`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;},1000);}
+
+btnStart.onclick=()=>{
+  if(!model) return; running=!running;
+  if(running){btnStart.textContent='⏸ PAUSE';btnStart.classList.add('active');liveDot.classList.add('on');statusLbl.classList.add('on');statusLbl.textContent='LIVE';if(!startTime)startTimer();detect();}
+  else{btnStart.textContent='▶ LANJUT';btnStart.classList.remove('active');liveDot.classList.remove('on');statusLbl.classList.remove('on');statusLbl.textContent='PAUSED';cancelAnimationFrame(animId);}
+};
+
+btnReset.onclick=()=>{
+  if(running){running=false;cancelAnimationFrame(animId);btnStart.textContent='▶ MULAI';btnStart.classList.remove('active');liveDot.classList.remove('on');statusLbl.classList.remove('on');statusLbl.textContent='OFFLINE';}
+  cnt.mudik={total:0,car:0,truck:0,moto:0};cnt.balik={total:0,car:0,truck:0,moto:0};
+  grandTotal=0;trackedObjs=[];logEntries=[];
+  [valMudik,valBalik,valTotal,camMudik,camBalik,tcCar,tcTruck,tcMoto,tcNow].forEach(el=>el.textContent='0');
+  subMudik.textContent=subBalik.textContent='Mobil:0 Truk:0 Motor:0';
+  elapsed.textContent='00:00';fpsBadge.textContent='-- FPS';
+  clearInterval(elapsedInt);startTime=null;
+  ctx.clearRect(0,0,canvas.width,canvas.height);renderLog();
+};
+
+document.getElementById('btn-log').onclick=()=>{drawer.classList.toggle('open');backdrop.classList.toggle('show');};
+document.getElementById('drawer-close').onclick=closeDrawer;
+backdrop.onclick=closeDrawer;
+function closeDrawer(){drawer.classList.remove('open');backdrop.classList.remove('show');}
+
+document.getElementById('btn-export').onclick=()=>{
+  const rows=[['No','Waktu','Arah','Jenis'],
+    ...logEntries.map(e=>[e.num,e.t,e.dir==='mudik'?'Arus Mudik':'Arus Balik',e.cls]),
+    [],['=== RINGKASAN ==='],
+    ['Arus Mudik',cnt.mudik.total,`Mobil:${cnt.mudik.car}`,`Truk:${cnt.mudik.truck}`,`Motor:${cnt.mudik.moto}`],
+    ['Arus Balik',cnt.balik.total,`Mobil:${cnt.balik.car}`,`Truk:${cnt.balik.truck}`,`Motor:${cnt.balik.moto}`],
+    ['Total',grandTotal]];
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'}));
+  a.download=`mudik_balik_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+};
+</script>
+</body>
+</html>
