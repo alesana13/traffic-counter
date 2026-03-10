@@ -424,7 +424,6 @@ header {
 // ══════════════════════════════════════════════
 let currentToken = null;
 let pollInterval = null;
-let approvedName = '';
 
 const screenReq    = document.getElementById('screen-request');
 const screenWait   = document.getElementById('screen-wait');
@@ -437,6 +436,37 @@ function showScreen(id) {
   });
 }
 
+// ── CEK SESSION TERSIMPAN saat halaman dibuka
+// Hanya auto-login jika server masih confirm 'approved'
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = sessionStorage.getItem('tc_approved');
+  if (!saved) return; // tidak ada session → tampil halaman request (default)
+  try {
+    const { name, token } = JSON.parse(saved);
+    if (!name || !token) { sessionStorage.removeItem('tc_approved'); return; }
+    // Verifikasi ke server dulu — jangan langsung masuk
+    fetch(`/api/status/${token}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(data => {
+        if (data.status === 'approved') {
+          // Server confirm masih approved → boleh masuk
+          launchApp(name);
+        } else {
+          // Server restart / token expired → minta akses ulang
+          sessionStorage.removeItem('tc_approved');
+          showScreen('screen-request');
+        }
+      })
+      .catch(() => {
+        // Tidak bisa cek server → minta akses ulang (aman)
+        sessionStorage.removeItem('tc_approved');
+        showScreen('screen-request');
+      });
+  } catch(e) {
+    sessionStorage.removeItem('tc_approved');
+  }
+});
+
 // ── REQUEST ACCESS
 document.getElementById('btn-request').onclick = async () => {
   const name = document.getElementById('input-name').value.trim();
@@ -448,6 +478,9 @@ document.getElementById('btn-request').onclick = async () => {
   const btn = document.getElementById('btn-request');
   btn.disabled = true; btn.textContent = '⏳ Mengirim...';
 
+  // Hapus session lama agar tidak auto-open dari sesi sebelumnya
+  sessionStorage.removeItem('tc_approved');
+
   try {
     const res  = await fetch('/api/request-access', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -455,16 +488,20 @@ document.getElementById('btn-request').onclick = async () => {
     });
     const data = await res.json();
 
-    if (!res.ok) { errEl.textContent = data.error || 'Gagal mengirim permintaan'; btn.disabled=false; btn.textContent='📲 Kirim Permintaan Akses'; return; }
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Gagal mengirim permintaan';
+      btn.disabled=false; btn.textContent='📲 Kirim Permintaan Akses';
+      return;
+    }
 
     currentToken = data.token;
     document.getElementById('wait-token').textContent = data.token;
-
     const expiresIn = Math.round((data.expires - Date.now()) / 1000);
     document.getElementById('wait-expire').textContent = `Berlaku ${Math.floor(expiresIn/60)} menit`;
 
     showScreen('screen-wait');
-    startPolling(name);
+    // Tunda polling 2 detik agar tidak langsung cek sebelum server siap
+    setTimeout(() => startPolling(name), 2000);
 
   } catch(e) {
     errEl.textContent = '⚠ Gagal terhubung ke server';
@@ -472,35 +509,52 @@ document.getElementById('btn-request').onclick = async () => {
   }
 };
 
-// Enter key on input
 document.getElementById('input-name').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('btn-request').click();
 });
 
-// ── POLLING STATUS
+// ── POLLING — hanya buka jika server benar-benar balas 'approved'
 function startPolling(name) {
   clearInterval(pollInterval);
+  let pollCount = 0;
+
   pollInterval = setInterval(async () => {
+    // Batas maksimal polling: 15 menit (300 x 3 detik)
+    pollCount++;
+    if (pollCount > 300) {
+      clearInterval(pollInterval);
+      document.getElementById('reject-title').textContent = '⏰ Waktu Habis';
+      document.getElementById('reject-desc').textContent  = 'Permintaan tidak disetujui dalam 15 menit.';
+      showScreen('screen-reject');
+      return;
+    }
+
     try {
-      const res  = await fetch(`/api/status/${currentToken}`);
+      const res = await fetch(`/api/status/${currentToken}`);
+      if (!res.ok) return; // error jaringan, coba lagi nanti
+
       const data = await res.json();
 
       if (data.status === 'approved') {
+        // ✅ HANYA buka jika status PERSIS 'approved'
         clearInterval(pollInterval);
-        approvedName = name;
+        sessionStorage.setItem('tc_approved', JSON.stringify({ name, token: currentToken }));
         launchApp(name);
+
       } else if (data.status === 'rejected') {
         clearInterval(pollInterval);
         document.getElementById('reject-title').textContent = '🚫 Akses Ditolak';
-        document.getElementById('reject-desc').textContent  = 'Pemilik tidak mengizinkan akses saat ini. Hubungi pemilik untuk informasi lebih lanjut.';
+        document.getElementById('reject-desc').textContent  = 'Pemilik tidak mengizinkan akses saat ini.';
         showScreen('screen-reject');
+
       } else if (data.status === 'expired' || data.status === 'not_found') {
         clearInterval(pollInterval);
         document.getElementById('reject-title').textContent = '⏰ Waktu Habis';
-        document.getElementById('reject-desc').textContent  = 'Permintaan akses tidak disetujui dalam waktu yang ditentukan. Silakan coba lagi.';
+        document.getElementById('reject-desc').textContent  = 'Permintaan tidak disetujui tepat waktu. Silakan coba lagi.';
         showScreen('screen-reject');
       }
-    } catch(e) { /* keep polling */ }
+      // status 'pending' → diam, lanjut polling
+    } catch(e) { /* jaringan error → lanjut polling */ }
   }, 3000);
 }
 
@@ -570,10 +624,22 @@ const logBody  = document.getElementById('log-body');
 const drawer   = document.getElementById('log-drawer');
 const backdrop = document.getElementById('backdrop');
 
+// ── FIX BUG 3: Kamera & model load PARALEL (bukan berurutan)
 async function initApp() {
-  model = await cocoSsd.load({ base:'lite_mobilenet_v2' });
-  loadTxt.textContent = 'MEMULAI KAMERA...';
-  await startCamera();
+  loadTxt.textContent = 'MEMUAT KAMERA & AI...';
+
+  // Jalankan keduanya bersamaan
+  const [loadedModel] = await Promise.all([
+    cocoSsd.load({ base:'lite_mobilenet_v2' }).then(m => {
+      loadTxt.textContent = 'AI siap ✓  — menunggu kamera...';
+      return m;
+    }),
+    startCamera().then(() => {
+      loadTxt.textContent = 'Kamera siap ✓  — menunggu AI...';
+    })
+  ]);
+
+  model = loadedModel;
   loading.style.display = 'none';
 }
 
