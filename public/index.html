@@ -424,10 +424,11 @@ header {
 // ═══════════════════════════════════════════════════════
 
 // ── State auth
-let currentToken  = null;
-let pollInterval  = null;
-let revalidateInt = null;
-let appSession    = null; // { token, accessKey, name, grantedAt }
+let currentToken       = null;
+let pollInterval       = null;
+let revalidateInt      = null;
+let appSession         = null;
+let pageAuthCancelled  = false; // true setelah user klik submit → batalkan DOMContentLoaded auto-login
 
 // ── Elemen
 const screenReq    = document.getElementById('screen-request');
@@ -473,23 +474,24 @@ window.addEventListener('DOMContentLoaded', () => {
   if (Date.now() - sess.grantedAt > 2 * 60 * 60 * 1000) {
     sessionStorage.removeItem('tc_sess'); return;
   }
-  // Verifikasi ke server
+  // Verifikasi ke server — WAJIB valid, tidak boleh bypass
   fetch('/api/verify', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: sess.token, accessKey: sess.accessKey })
+    body: JSON.stringify({ accessKey: sess.accessKey })
   })
   .then(r => r.json())
   .then(d => {
+    if (pageAuthCancelled) return;
     if (d.valid) {
       launchApp(sess);
     } else {
       sessionStorage.removeItem('tc_sess');
-      // Tidak perlu show screen — form sudah tampil default
     }
   })
   .catch(() => {
-    // Server tidak bisa dijangkau (Railway cold start) → percayai session lokal
-    launchApp(sess);
+    if (pageAuthCancelled) return;
+    // Server error → JANGAN buka app, hapus session, minta akses ulang
+    sessionStorage.removeItem('tc_sess');
   });
 });
 
@@ -502,6 +504,7 @@ document.getElementById('btn-request').onclick = async () => {
 
   const btn = document.getElementById('btn-request');
   btn.disabled = true; btn.textContent = '⏳ Mengirim...';
+  pageAuthCancelled = true;  // ← batalkan DOMContentLoaded auto-login
   sessionStorage.removeItem('tc_sess');
 
   try {
@@ -590,7 +593,7 @@ function launchApp(sess) {
     try {
       const res  = await fetch('/api/verify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: sess.token, accessKey: sess.accessKey })
+        body: JSON.stringify({ accessKey: sess.accessKey })
       });
       const d = await res.json().catch(() => ({}));
       if (d.valid === false) forceLogout('🚫 Akses Dicabut', 'Pemilik telah mencabut akses Anda.');
