@@ -7,6 +7,17 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+
+// Paksa browser selalu ambil index.html terbaru (tidak boleh cache)
+app.use((req, res, next) => {
+  if (req.path === '/' || req.path.endsWith('.html')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─────────────────────────────────────────────
