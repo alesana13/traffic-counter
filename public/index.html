@@ -478,7 +478,7 @@ function forceLogout(title, desc) {
   running = false;
   cancelAnimationFrame(animId);
   if (stream) stream.getTracks().forEach(t => t.stop());
-  sessionStorage.removeItem('tc_sess');
+  sessionStorage.removeItem('tc_sess'); // bersihkan jika ada sisa
   appEl.style.display = 'none';
   [screenReq, screenWait, screenReject].forEach(s => {
     s.style.display = '';
@@ -489,36 +489,9 @@ function forceLogout(title, desc) {
 
 // ── Cek session saat halaman dibuka
 window.addEventListener('DOMContentLoaded', () => {
-  const raw = sessionStorage.getItem('tc_sess');
-  if (!raw) return; // tidak ada → form request (default)
-  let sess;
-  try { sess = JSON.parse(raw); } catch(e) { sessionStorage.removeItem('tc_sess'); return; }
-  if (!sess || !sess.token || !sess.accessKey || !sess.name || !sess.grantedAt) {
-    sessionStorage.removeItem('tc_sess'); return;
-  }
-  // Expired lebih dari 2 jam
-  if (Date.now() - sess.grantedAt > 2 * 60 * 60 * 1000) {
-    sessionStorage.removeItem('tc_sess'); return;
-  }
-  // Verifikasi ke server — WAJIB valid, tidak boleh bypass
-  fetch('/api/verify', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accessKey: sess.accessKey })
-  })
-  .then(r => r.json())
-  .then(d => {
-    if (pageAuthCancelled) return;
-    if (d.valid) {
-      launchApp(sess);
-    } else {
-      sessionStorage.removeItem('tc_sess');
-    }
-  })
-  .catch(() => {
-    if (pageAuthCancelled) return;
-    // Server error → JANGAN buka app, hapus session, minta akses ulang
-    sessionStorage.removeItem('tc_sess');
-  });
+  // Selalu hapus session lama saat halaman dibuka
+  // Tidak ada auto-restore — user WAJIB minta akses baru setiap kali buka URL
+  sessionStorage.removeItem('tc_sess');
 });
 
 // ── Tombol Minta Akses
@@ -577,7 +550,6 @@ function startPolling(name) {
       if (st === 'approved' && data.accessKey) {
         clearInterval(pollInterval);
         const sess = { token: currentToken, accessKey: data.accessKey, name, grantedAt: Date.now() };
-        sessionStorage.setItem('tc_sess', JSON.stringify(sess));
         launchApp(sess);
       } else if (st === 'rejected') {
         clearInterval(pollInterval);
