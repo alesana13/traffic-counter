@@ -489,9 +489,36 @@ function forceLogout(title, desc) {
 
 // ── Cek session saat halaman dibuka
 window.addEventListener('DOMContentLoaded', () => {
-  // Selalu hapus session lama saat halaman dibuka
-  // Tidak ada auto-restore — user WAJIB minta akses baru setiap kali buka URL
-  sessionStorage.removeItem('tc_sess');
+  // Cek tipe navigasi: 'reload' = F5, 'navigate' = buka URL baru
+  const navType = performance?.getEntriesByType?.('navigation')?.[0]?.type ?? 'navigate';
+
+  if (navType !== 'reload') {
+    // Buka URL baru / klik link → hapus session, wajib auth ulang
+    sessionStorage.removeItem('tc_sess');
+    return;
+  }
+
+  // Hanya F5 yang bisa restore session
+  const raw = sessionStorage.getItem('tc_sess');
+  if (!raw) return;
+  let sess;
+  try { sess = JSON.parse(raw); } catch(e) { sessionStorage.removeItem('tc_sess'); return; }
+  if (!sess?.accessKey || !sess?.name) { sessionStorage.removeItem('tc_sess'); return; }
+
+  // Verifikasi ke server — wajib valid
+  fetch('/api/verify', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessKey: sess.accessKey })
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.valid) launchApp(sess);
+    else sessionStorage.removeItem('tc_sess');
+  })
+  .catch(() => {
+    // Server tidak bisa dijangkau → jangan buka app
+    sessionStorage.removeItem('tc_sess');
+  });
 });
 
 // ── Tombol Minta Akses
@@ -549,7 +576,8 @@ function startPolling(name) {
       const st   = data.status || '';
       if (st === 'approved' && data.accessKey) {
         clearInterval(pollInterval);
-        const sess = { token: currentToken, accessKey: data.accessKey, name, grantedAt: Date.now() };
+        const sess = { accessKey: data.accessKey, name, grantedAt: Date.now() };
+        sessionStorage.setItem('tc_sess', JSON.stringify(sess));
         launchApp(sess);
       } else if (st === 'rejected') {
         clearInterval(pollInterval);
