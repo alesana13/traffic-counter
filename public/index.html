@@ -282,6 +282,26 @@ header {
 .log-empty { color:var(--dim); font-family:'Share Tech Mono',monospace; font-size:.72rem; padding:12px 0; }
 .drawer-export { margin:8px 14px 6px; padding:9px; flex-shrink:0; border:1px solid rgba(0,229,255,.3); border-radius:7px; background:none; color:var(--cyan); font-family:'Rajdhani',sans-serif; font-size:.82rem; font-weight:600; letter-spacing:.1em; cursor:pointer; text-transform:uppercase; }
 .drawer-export:active { opacity:.6; }
+
+/* ── Location bar ── */
+.loc-bar {
+  display:flex; align-items:center; gap:8px; padding:4px 14px;
+  background:rgba(0,0,0,.35); border-top:1px solid var(--bdr);
+  flex-shrink:0; overflow:hidden;
+}
+.loc-icon { font-size:.85rem; flex-shrink:0; }
+.loc-text {
+  font-family:'Share Tech Mono',monospace; font-size:.58rem;
+  color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;
+}
+.loc-text.ready { color:var(--balik); }
+.loc-text.error { color:var(--red); }
+.loc-btn {
+  background:none; border:1px solid var(--bdr); color:var(--dim);
+  font-family:'Share Tech Mono',monospace; font-size:.55rem; padding:2px 7px;
+  border-radius:4px; cursor:pointer; flex-shrink:0; white-space:nowrap;
+}
+.loc-btn:active { opacity:.6; }
 </style>
 </head>
 <body>
@@ -391,6 +411,12 @@ header {
     <div class="tc"><div class="dot" style="background:#00e5ff"></div>Truk/Bus <b id="tc-truck">0</b></div>
     <div class="tc"><div class="dot" style="background:#ff9f40"></div>Motor <b id="tc-moto">0</b></div>
     <div class="tc" style="margin-left:auto"><div class="dot" style="background:#888"></div>Di frame <b id="tc-now">0</b></div>
+  </div>
+
+  <div class="loc-bar">
+    <span class="loc-icon">📍</span>
+    <span class="loc-text" id="loc-text">Lokasi belum diambil</span>
+    <button class="loc-btn" id="loc-btn">Ambil Lokasi</button>
   </div>
 
   <div class="controls">
@@ -616,6 +642,7 @@ let grandTotal=0, trackedObjs=[], nextId=1, logEntries=[];
 let startTime=null, elapsedInt=null;
 let frameCount=0, fpsTime=Date.now();
 let activeTab='all';
+let geoData = null; // { lat, lng, address, accuracy, timestamp }
 
 const video    = document.getElementById('video');
 const canvas   = document.getElementById('canvas');
@@ -643,6 +670,63 @@ const logBody  = document.getElementById('log-body');
 const drawer   = document.getElementById('log-drawer');
 const backdrop = document.getElementById('backdrop');
 
+// ── GEOLOCATION
+async function getLocation() {
+  const locText = document.getElementById('loc-text');
+  const locBtn  = document.getElementById('loc-btn');
+  locText.className = 'loc-text';
+  locText.textContent = '⏳ Mengambil lokasi...';
+  locBtn.disabled = true; locBtn.textContent = '...';
+
+  if (!navigator.geolocation) {
+    locText.className = 'loc-text error';
+    locText.textContent = 'Geolocation tidak didukung browser ini';
+    locBtn.disabled = false; locBtn.textContent = 'Coba Lagi';
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = pos.coords.latitude.toFixed(6);
+      const lng = pos.coords.longitude.toFixed(6);
+      const acc = Math.round(pos.coords.accuracy);
+      geoData = { lat, lng, accuracy: acc, address: `${lat}, ${lng}`, timestamp: new Date().toISOString() };
+
+      locText.className = 'loc-text ready';
+      locText.textContent = `📡 ${lat}, ${lng}  (±${acc}m)`;
+      locBtn.textContent = '🔄 Perbarui';
+      locBtn.disabled = false;
+
+      // Reverse geocode via OpenStreetMap Nominatim (gratis, no API key)
+      try {
+        const r = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=id`,
+          { headers: { 'User-Agent': 'MudikBalikTrafficCounter/1.0' } }
+        );
+        const d = await r.json();
+        const road    = d.address?.road || d.address?.pedestrian || '';
+        const village = d.address?.village || d.address?.suburb || d.address?.town || '';
+        const city    = d.address?.city || d.address?.regency || d.address?.county || '';
+        const parts   = [road, village, city].filter(Boolean);
+        const address = parts.length ? parts.join(', ') : d.display_name?.split(',').slice(0,3).join(',') || `${lat}, ${lng}`;
+        geoData.address = address;
+        locText.textContent = `📍 ${address}  (±${acc}m)`;
+      } catch(e) {
+        // Nominatim gagal, tetap tampilkan koordinat
+      }
+    },
+    (err) => {
+      locText.className = 'loc-text error';
+      const msg = { 1:'Izin lokasi ditolak', 2:'Lokasi tidak tersedia', 3:'Timeout ambil lokasi' }[err.code] || 'Gagal ambil lokasi';
+      locText.textContent = `⚠ ${msg}`;
+      locBtn.disabled = false; locBtn.textContent = 'Coba Lagi';
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  );
+}
+
+document.getElementById('loc-btn').onclick = getLocation;
+
 async function initApp() {
   loadTxt.textContent = 'MEMUAT KAMERA & AI...';
   const [loadedModel] = await Promise.all([
@@ -655,6 +739,8 @@ async function initApp() {
   ]);
   model = loadedModel;
   loading.style.display = 'none';
+  // Otomatis minta lokasi setelah app siap
+  getLocation();
 }
 
 async function startCamera() {
@@ -810,7 +896,12 @@ backdrop.onclick = closeDrawer;
 function closeDrawer() { drawer.classList.remove('open'); backdrop.classList.remove('show'); }
 
 document.getElementById('btn-export').onclick = () => {
+  const locInfo = geoData
+    ? [`Lokasi: ${geoData.address}`, `Koordinat: ${geoData.lat}, ${geoData.lng}`, `Akurasi: ±${geoData.accuracy}m`, `Waktu GPS: ${geoData.timestamp}`]
+    : ['Lokasi: Tidak diambil'];
   const rows = [
+    ...locInfo,
+    [],
     ['No','Waktu','Arah','Jenis'],
     ...logEntries.map(e => [e.num, e.t, e.dir==='mudik'?'Arus Mudik':'Arus Balik', e.cls]),
     [], ['=== RINGKASAN ==='],
