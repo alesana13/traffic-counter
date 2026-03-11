@@ -318,15 +318,13 @@ header {
   <div class="gate-card">
     <h2>🔐 Minta Akses</h2>
     <p>Aplikasi ini memerlukan persetujuan pemilik.<br>
-       Masukkan nama Anda, notifikasi akan dikirim ke pemilik untuk disetujui.</p>
+       Masukkan nama Anda, notifikasi WA akan dikirim ke pemilik untuk disetujui.</p>
     <input class="gate-input" id="input-name" type="text" placeholder="Masukkan nama Anda..." maxlength="40" autocomplete="off">
     <button class="gate-btn" id="btn-request">📲 Kirim Permintaan Akses</button>
     <div class="gate-err" id="req-err"></div>
   </div>
   <div style="margin-top:20px;font-family:'Share Tech Mono',monospace;font-size:.78rem;color:#7ecfff;letter-spacing:.1em;text-align:center;">
     Built with ❤ by <span style="color:#ffe066;font-weight:700;">Dadi Multiana</span>
-    <br/>
-    <p> [Alesana~13] </p>
   </div>
 </div>
 
@@ -337,7 +335,7 @@ header {
   <div class="pulse-ring"></div>
   <div class="wait-title">⏳ Menunggu Persetujuan...</div>
   <div class="wait-desc">
-    Notifikasi telah dikirim ke pemilik.<br>
+    Notifikasi WhatsApp telah dikirim ke pemilik.<br>
     Halaman ini akan otomatis terbuka<br>setelah disetujui.
   </div>
   <div class="dots"><span></span><span></span><span></span></div>
@@ -767,7 +765,7 @@ async function detect() {
   canvas.height = video.videoHeight || video.clientHeight;
   const preds    = await model.detect(video);
   const lineX    = canvas.width * LINE_RATIO;
-  const vehicles = preds.filter(p => VEHICLE_CLASSES.includes(p.class) && p.score > 0.42);
+  const vehicles = preds.filter(p => VEHICLE_CLASSES.includes(p.class) && p.score > 0.30);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   // Garis vertikal
@@ -797,7 +795,7 @@ async function detect() {
       obj = { id:nextId++, cx, cy, prevCx:cx, bbox:[x,y,w,h], class:pred.class, crossed:false, frames:1 };
     }
     obj.score = pred.score;
-    if (!obj.crossed && obj.frames >= 2) {
+    if (!obj.crossed && obj.frames >= 1) {
       const mg = canvas.width * CROSS_MARGIN;
       const goRight = obj.prevCx < lineX-mg && obj.cx >= lineX-mg;
       const goLeft  = obj.prevCx > lineX+mg && obj.cx <= lineX+mg;
